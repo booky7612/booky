@@ -7,12 +7,13 @@ Static browser app for turning either a CSV column of ISBN values or a pasted IS
 - A modern browser with JavaScript enabled
 - Internet access for Google Books API lookups
 - Python 3.9 or newer is optional and only needed for the local launcher
-- No third-party Python or Node packages are required
+- No third-party Python or Node packages are required. A local ZXing browser bundle is included for barcode scanning.
 
 ## Features
 
 - Upload a CSV file from your machine
 - Paste ISBN values directly as comma-separated or line-separated text
+- Scan ISBN barcodes with a device camera
 - Choose which column contains ISBN-13 values
 - Build a Shopify product CSV with:
   - Core Shopify columns such as `Title`, `Body (HTML)`, `Type`, `Option1 Name`, `Option1 Value`, `Image Src`, and `Handle`
@@ -40,6 +41,7 @@ GitHub Pages serves these files directly:
 - `index.html`
 - `styles.css`
 - `app.js`
+- `vendor/zxing-browser.min.js`
 - `.nojekyll`
 
 The local launcher files can remain in the repository. GitHub Pages ignores them.
@@ -97,6 +99,8 @@ Then open `http://127.0.0.1:8000/` if your browser does not open automatically.
 
 - The app expects ISBN-13 values. It accepts digits with optional hyphens or spaces.
 - Pasted input accepts commas, new lines, or a mix of both as separators.
+- Barcode scanning uses the device camera over HTTPS and prefers the rear camera when the browser exposes one. It scans EAN-13 book barcodes, validates `978` or `979` ISBN-13 values, and adds unique scans to the ISBN list before metadata lookup.
+- The scanner uses the browser's native `BarcodeDetector` API when available and falls back to the local ZXing bundle for browsers such as Safari on iPhone and iPad.
 - Google Books metadata varies by title. `Translator`, `Format`, dimensions, page count, and cover art may be blank if Google does not return them.
 - Cover exports prefer Google Books image URLs when available, then fall back to Open Library ISBN cover URLs. The browser preview also tries the fallback image if the primary cover fails to load.
 - If the browser preview successfully switches a broken cover to its fallback image, the exported `Image Src` is updated to that working fallback URL.

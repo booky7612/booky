@@ -56,6 +56,43 @@
           </div>
         </section>
 
+        <section id="scannerModal" class="modal-shell hidden" aria-hidden="true">
+          <div id="scannerBackdrop" class="modal-backdrop"></div>
+          <div class="scanner-modal" role="dialog" aria-modal="true" aria-labelledby="scannerTitle">
+            <div class="settings-modal-header">
+              <div>
+                <p class="section-kicker">Barcode scanner</p>
+                <h2 id="scannerTitle">Scan ISBNs</h2>
+              </div>
+              <button id="scannerClose" class="button icon-button subtle" type="button" aria-label="Close scanner">
+                <span class="settings-close" aria-hidden="true"></span>
+              </button>
+            </div>
+
+            <div class="scanner-grid">
+              <div class="scanner-camera">
+                <video id="scannerVideo" playsinline muted></video>
+                <div class="scanner-reticle" aria-hidden="true"></div>
+              </div>
+
+              <div class="scanner-panel">
+                <p id="scannerStatus" class="scanner-status">Camera is not running.</p>
+                <div class="scanner-list-wrap">
+                  <div class="scanner-list-header">
+                    <span>Scanned ISBNs</span>
+                    <strong id="scannerCount">0</strong>
+                  </div>
+                  <ul id="scannerList" class="scanner-list"></ul>
+                </div>
+                <div class="actions scanner-actions">
+                  <button id="useScannedButton" class="button primary" type="button" disabled>Use scanned ISBNs</button>
+                  <button id="clearScannedButton" class="button secondary" type="button" disabled>Clear</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <div class="workspace-grid">
       <section class="panel controls-panel">
         <div class="panel-header">
@@ -85,6 +122,7 @@
 
         <div class="actions inline-actions">
           <button id="loadPasteButton" class="button secondary">Load pasted ISBNs</button>
+          <button id="scanButton" class="button secondary" type="button">Scan barcode</button>
         </div>
 
         <div id="columnField" class="field hidden">
@@ -137,6 +175,7 @@
     </main>
   </div>
 
+  <script src="vendor/zxing-browser.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
