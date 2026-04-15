@@ -35,10 +35,13 @@ const TRANSLATOR_METAFIELD = "Translator (product.metafields.custom.translator)"
 const FORMAT_METAFIELD = "Format (product.metafields.custom.format)";
 
 const OUTPUT_COLUMNS = [
+  "Handle",
   "Title",
-  "Description",
+  "Body (HTML)",
   "Type",
-  "Product image URL",
+  "Option1 Name",
+  "Option1 Value",
+  "Image Src",
   AUTHOR_METAFIELD,
   PUBLICATION_DATE_METAFIELD,
   PUBLISHER_METAFIELD,
@@ -46,6 +49,17 @@ const OUTPUT_COLUMNS = [
   TRANSLATOR_METAFIELD,
   FORMAT_METAFIELD,
 ];
+
+const PREVIEW_COLUMN_LABELS = {
+  "Body (HTML)": "Description",
+  "Image Src": "Cover",
+  [AUTHOR_METAFIELD]: "Author",
+  [PUBLICATION_DATE_METAFIELD]: "Publication Date",
+  [PUBLISHER_METAFIELD]: "Publisher",
+  [PAGE_COUNT_METAFIELD]: "Page Count",
+  [TRANSLATOR_METAFIELD]: "Translator",
+  [FORMAT_METAFIELD]: "Format",
+};
 
 const REQUEST_DELAY_MS = 350;
 const MAX_RETRIES = 4;
@@ -328,11 +342,19 @@ function renderPreview(rows) {
 }
 
 function renderPreviewHeader() {
-  previewHead.innerHTML = `<tr>${OUTPUT_COLUMNS.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr>`;
+  previewHead.innerHTML = `<tr>${OUTPUT_COLUMNS.map((column) => {
+    const label = getPreviewColumnLabel(column);
+    const title = label === column ? "" : ` title="${escapeAttribute(column)}"`;
+    return `<th${title}>${escapeHtml(label)}</th>`;
+  }).join("")}</tr>`;
+}
+
+function getPreviewColumnLabel(column) {
+  return PREVIEW_COLUMN_LABELS[column] || column;
 }
 
 function renderPreviewCell(column, row, index) {
-  if (column === "Description") {
+  if (column === "Body (HTML)") {
     const descriptionId = `description-${index}`;
     const fullDescription = row[column] || "";
     const previewDescription = buildDescriptionPreview(fullDescription);
@@ -346,7 +368,7 @@ function renderPreviewCell(column, row, index) {
     `;
   }
 
-  if (column === "Product image URL") {
+  if (column === "Image Src") {
     return `<td class="media-cell">${renderMediaCell(row[column], row["Title"])}</td>`;
   }
 
@@ -444,7 +466,7 @@ async function buildBookResult(isbn, item) {
   const identifiers = volumeInfo.industryIdentifiers || [];
   const isbn13Entry = identifiers.find((entry) => entry.type === "ISBN_13");
   const outputIsbn = (isbn13Entry && isbn13Entry.identifier) || isbn;
-  const title = volumeInfo.title || "";
+  const title = volumeInfo.title || `ISBN ${outputIsbn}`;
   const description = cleanDescription(volumeInfo.description);
   const author = Array.isArray(volumeInfo.authors) ? volumeInfo.authors.join(", ") : "";
   const publicationDate = formatPublicationDate(volumeInfo.publishedDate);
@@ -456,10 +478,13 @@ async function buildBookResult(isbn, item) {
   return {
     found: true,
     row: {
+      "Handle": buildShopifyHandle(title, outputIsbn),
       "Title": title,
-      "Description": description,
+      "Body (HTML)": description,
       "Type": "Book",
-      "Product image URL": coverImageUrl,
+      "Option1 Name": "Title",
+      "Option1 Value": "Default Title",
+      "Image Src": coverImageUrl,
       [AUTHOR_METAFIELD]: author,
       [PUBLICATION_DATE_METAFIELD]: publicationDate,
       [PUBLISHER_METAFIELD]: publisher,
@@ -471,11 +496,16 @@ async function buildBookResult(isbn, item) {
 }
 
 function buildEmptyRow(isbn, descriptionFallback) {
+  const normalizedIsbn = normalizeIsbn(isbn);
+
   return {
-    "Title": "",
-    "Description": descriptionFallback || "",
+    "Handle": buildShopifyHandle("", normalizedIsbn || isbn),
+    "Title": normalizedIsbn ? `ISBN ${normalizedIsbn}` : "Book",
+    "Body (HTML)": descriptionFallback || "",
     "Type": "Book",
-    "Product image URL": "",
+    "Option1 Name": "Title",
+    "Option1 Value": "Default Title",
+    "Image Src": "",
     [AUTHOR_METAFIELD]: "",
     [PUBLICATION_DATE_METAFIELD]: "",
     [PUBLISHER_METAFIELD]: "",
@@ -493,6 +523,22 @@ function normalizeIsbn(value) {
     return cleaned;
   }
   return "";
+}
+
+function buildShopifyHandle(title, isbn) {
+  const source = String(title || isbn || "book")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  const baseHandle = source || "book";
+  const isbnSuffix = normalizeIsbn(isbn);
+  if (isbnSuffix && !baseHandle.includes(isbnSuffix)) {
+    return `${baseHandle}-${isbnSuffix}`;
+  }
+
+  return baseHandle;
 }
 
 function deriveExportFilename(filename) {
