@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://covers.openlibrary.org https://books.google.com https://*.googleusercontent.com https://*.ggpht.com; connect-src https://www.googleapis.com https://openlibrary.org; object-src 'none'; base-uri 'self'; form-action 'none'; upgrade-insecure-requests">
+  <meta name="referrer" content="no-referrer">
+  <title>Booky</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Cormorant+Garamond:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="page-shell">
+    <main class="workspace">
+      <section class="app-frame">
+        <div class="frame-ornament frame-ornament-left" aria-hidden="true"></div>
+        <div class="frame-ornament frame-ornament-right" aria-hidden="true"></div>
+        <div class="app-topbar">
+          <div>
+            <h1>Booky</h1>
+          </div>
+          <div class="topbar-actions">
+            <button id="settingsToggle" class="button icon-button" type="button" aria-expanded="false" aria-controls="settingsModal" aria-label="Open settings">
+              <span class="settings-icon" aria-hidden="true"></span>
+            </button>
+          </div>
+        </div>
+
+        <section id="settingsModal" class="modal-shell hidden" aria-hidden="true">
+          <div id="settingsBackdrop" class="modal-backdrop"></div>
+          <div class="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+            <div class="settings-modal-header">
+              <div>
+                <p class="section-kicker">Settings</p>
+                <h2 id="settingsTitle">Booky preferences</h2>
+              </div>
+              <button id="settingsClose" class="button icon-button subtle" type="button" aria-label="Close settings">
+                <span class="settings-close" aria-hidden="true"></span>
+              </button>
+            </div>
+
+            <div class="settings-grid">
+              <label class="field">
+                <span>Google Books API key</span>
+                <input id="apiKey" type="password" placeholder="Used only in this tab" autocomplete="off" autocapitalize="off" spellcheck="false">
+              </label>
+
+              <label class="field">
+                <span>Export filename</span>
+                <input id="exportFilename" type="text" value="enriched-books.csv" placeholder="enriched-books.csv">
+              </label>
+            </div>
+            <p class="settings-note">The API key is kept only in this page while it is open. It is sent directly from your browser to Google Books and is never stored by Booky.</p>
+          </div>
+        </section>
+
+        <div class="workspace-grid">
+      <section class="panel controls-panel">
+        <div class="panel-header">
+          <p class="section-kicker">Input</p>
+        </div>
+
+        <label class="upload-zone" for="csvFile">
+          <input id="csvFile" type="file" accept=".csv,text/csv">
+          <span class="upload-title">Choose CSV file</span>
+          <span class="upload-subtitle">Drag a file here or browse locally</span>
+        </label>
+
+        <div id="fileSummary" class="file-summary hidden"></div>
+
+        <div class="divider">
+          <span>Or paste ISBNs</span>
+        </div>
+
+        <label class="field">
+          <span>ISBN list</span>
+          <textarea
+            id="isbnPaste"
+            rows="7"
+            placeholder="9781635570291, 9780143127741&#10;9780061120084&#10;9780307277671"
+          ></textarea>
+        </label>
+
+        <div class="actions inline-actions">
+          <button id="loadPasteButton" class="button secondary">Load pasted ISBNs</button>
+        </div>
+
+        <div id="columnField" class="field hidden">
+          <label class="field">
+            <span>ISBN column</span>
+            <select id="isbnColumn" disabled>
+              <option value="">Select a column</option>
+            </select>
+          </label>
+        </div>
+
+        <p id="columnHint" class="input-hint">Required only for CSV uploads.</p>
+
+        <div class="actions">
+          <button id="processButton" class="button primary" disabled>Fetch book data</button>
+          <button id="exportButton" class="button secondary" disabled>Export CSV</button>
+        </div>
+
+        <div id="statusBanner" class="status-banner hidden"></div>
+      </section>
+
+      <section class="panel preview-panel">
+        <div class="panel-header preview-header">
+          <div>
+            <p class="section-kicker">Preview</p>
+            <h2>Shopify product sheet</h2>
+            <p id="previewMeta">No data loaded yet.</p>
+          </div>
+          <label class="search-field" for="tableSearch">
+            <span>Search results</span>
+            <input id="tableSearch" type="text" placeholder="Search Shopify fields and metafields...">
+          </label>
+        </div>
+
+        <div class="table-wrap">
+          <table id="previewTable">
+            <thead id="previewHead">
+              <tr></tr>
+            </thead>
+            <tbody id="previewBody">
+              <tr class="empty-row">
+                <td>Upload a CSV to begin.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
