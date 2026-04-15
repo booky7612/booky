@@ -2,11 +2,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
 import mimetypes
+import os
+from urllib.parse import unquote, urlparse
 import webbrowser
 
 
-HOST = "127.0.0.1"
-PORT = 8000
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = 8000
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -14,10 +16,15 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 
 class BookyHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
-        target = "index.html" if self.path in ("/", "") else self.path.lstrip("/")
+        request_path = unquote(urlparse(self.path).path)
+        target = "index.html" if request_path in ("/", "") else request_path.lstrip("/")
         file_path = (PROJECT_ROOT / target).resolve()
 
-        if not str(file_path).startswith(str(PROJECT_ROOT)) or not file_path.is_file():
+        if PROJECT_ROOT not in file_path.parents and file_path != PROJECT_ROOT:
+            self.send_error(404, "File not found")
+            return
+
+        if not file_path.is_file():
             self.send_error(404, "File not found")
             return
 
@@ -41,12 +48,17 @@ class BookyHandler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    server = ThreadingHTTPServer((HOST, PORT), BookyHandler)
-    url = f"http://{HOST}:{PORT}/"
+    deploy_port = os.environ.get("PORT")
+    port = int(deploy_port or DEFAULT_PORT)
+    host = os.environ.get("HOST") or ("0.0.0.0" if deploy_port else DEFAULT_HOST)
+    server = ThreadingHTTPServer((host, port), BookyHandler)
+    display_host = "127.0.0.1" if host == "0.0.0.0" else host
+    url = f"http://{display_host}:{port}/"
 
     print(f"Serving Booky on {url}")
-    print("Closing the Booky browser tab will stop the local process.")
-    webbrowser.open(url)
+    if not deploy_port:
+        print("Closing the Booky browser tab will stop the local process.")
+        webbrowser.open(url)
 
     try:
         server.serve_forever()

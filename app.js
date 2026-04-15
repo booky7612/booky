@@ -751,55 +751,83 @@ function renderPreviewCell(column, row, index) {
   }
 
   if (column === "Image Src") {
-    return `<td class="media-cell">${renderMediaCell(row[column], row["Title"], row["Cover Fallback URL"])}</td>`;
+    return `<td class="media-cell">${renderMediaCell(row[column], row["Title"], row["Cover Fallback URL"], row.__coverCandidates)}</td>`;
   }
 
   return `<td>${escapeHtml(row[column])}</td>`;
 }
 
-function renderMediaCell(url, title, fallbackUrl) {
+function renderMediaCell(url, title, fallbackUrl, coverCandidates) {
   if (!url) {
     return "";
   }
 
   const safeUrl = escapeAttribute(url);
-  const safeFallbackUrl = fallbackUrl ? escapeAttribute(fallbackUrl) : "";
   const safeTitle = escapeAttribute(title || "Book cover");
-  const fallbackAttribute = safeFallbackUrl ? ` data-fallback-src="${safeFallbackUrl}"` : "";
+  const candidates = normalizeCoverCandidates(coverCandidates || [url, fallbackUrl]);
+  const candidatesAttribute = candidates.length > 1 ? ` data-cover-candidates="${escapeAttribute(JSON.stringify(candidates))}"` : "";
 
   return `
     <a class="cover-tile" href="${safeUrl}" target="_blank" rel="noreferrer">
-      <img src="${safeUrl}" alt="${safeTitle}"${fallbackAttribute}>
+      <img src="${safeUrl}" alt="${safeTitle}"${candidatesAttribute}>
       <span>Open cover</span>
     </a>
   `;
 }
 
 function attachCoverFallbacks() {
-  const coverImages = previewBody.querySelectorAll("img[data-fallback-src]");
+  const coverImages = previewBody.querySelectorAll("img[data-cover-candidates]");
   coverImages.forEach((image) => {
     image.addEventListener("error", () => {
-      const fallbackSrc = image.getAttribute("data-fallback-src");
-      if (!fallbackSrc || image.src === fallbackSrc) {
+      const candidates = parseCoverCandidates(image.getAttribute("data-cover-candidates"));
+      const currentIndex = Math.max(Number(image.dataset.coverIndex || "0"), 0);
+      const nextSrc = candidates[currentIndex + 1];
+
+      if (!nextSrc) {
+        image.removeAttribute("data-cover-candidates");
         return;
       }
 
-      image.removeAttribute("data-fallback-src");
-      image.src = fallbackSrc;
+      image.dataset.coverIndex = String(currentIndex + 1);
+      image.src = nextSrc;
 
       const link = image.closest("a");
       if (link) {
-        link.href = fallbackSrc;
+        link.href = nextSrc;
       }
 
       const tableRow = image.closest("tr");
       const row = tableRow ? findEnrichedRowById(tableRow.dataset.rowId) : null;
       if (row) {
-        row["Image Src"] = fallbackSrc;
-        row["Cover Fallback URL"] = "";
+        row["Image Src"] = nextSrc;
+        row["Cover Fallback URL"] = candidates[currentIndex + 2] || "";
       }
-    }, { once: true });
+    });
   });
+}
+
+function normalizeCoverCandidates(candidates) {
+  const seen = new Set();
+  return candidates
+    .filter((url) => typeof url === "string" && url.trim() !== "")
+    .map((url) => url.trim())
+    .filter((url) => {
+      if (seen.has(url)) {
+        return false;
+      }
+
+      seen.add(url);
+      return true;
+    });
+}
+
+function parseCoverCandidates(value) {
+  try {
+    const candidates = JSON.parse(value || "[]");
+    return Array.isArray(candidates) ? normalizeCoverCandidates(candidates) : [];
+  } catch (error) {
+    return [];
+  }
 }
 
 function ensureRowId(row) {
@@ -903,7 +931,7 @@ async function buildBookResult(isbn, item) {
   const translator = extractTranslator(volumeInfo);
   const format = resolveFormat(volumeInfo, openLibraryMetadata);
   const bookSize = formatBookSize(volumeInfo.dimensions);
-  const coverImageUrls = buildCoverImageUrls(outputIsbn, volumeInfo.imageLinks || {});
+  const coverImageUrls = buildCoverImageUrls(outputIsbn, volumeInfo.imageLinks || {}, openLibraryMetadata);
 
   return {
     found: true,
@@ -916,6 +944,7 @@ async function buildBookResult(isbn, item) {
       "Option1 Value": "Default Title",
       "Image Src": coverImageUrls.primary,
       "Cover Fallback URL": coverImageUrls.fallback,
+      __coverCandidates: coverImageUrls.candidates,
       [AUTHOR_METAFIELD]: author,
       [PUBLICATION_DATE_METAFIELD]: publicationDate,
       [PUBLISHER_METAFIELD]: publisher,
@@ -1232,7 +1261,7 @@ function extractTranslator(volumeInfo) {
   return "";
 }
 
-function getBestCoverImageUrl(imageLinks) {
+function getGoogleCoverImageUrls(imageLinks) {
   const candidates = [
     imageLinks.extraLarge,
     imageLinks.large,
@@ -1242,30 +1271,34 @@ function getBestCoverImageUrl(imageLinks) {
     imageLinks.smallThumbnail,
   ];
 
-  const firstAvailable = candidates.find((url) => typeof url === "string" && url.trim() !== "");
-  if (!firstAvailable) {
-    return "";
-  }
-
-  return upgradeGoogleCoverUrl(firstAvailable);
+  return normalizeCoverCandidates(candidates).map((url) => upgradeGoogleCoverUrl(url));
 }
 
-function buildCoverImageUrls(isbn, imageLinks) {
-  const googleCoverUrl = getBestCoverImageUrl(imageLinks);
-  const openLibraryCoverUrl = getOpenLibraryCoverImageUrl(isbn);
+function buildCoverImageUrls(isbn, imageLinks, openLibraryMetadata) {
+  const googleCoverUrls = getGoogleCoverImageUrls(imageLinks);
+  const openLibraryCoverUrls = getOpenLibraryCoverImageUrls(isbn, openLibraryMetadata);
+  const candidates = normalizeCoverCandidates(openLibraryCoverUrls.concat(googleCoverUrls));
 
   return {
-    primary: googleCoverUrl || openLibraryCoverUrl,
-    fallback: googleCoverUrl ? openLibraryCoverUrl : "",
+    primary: candidates[0] || "",
+    fallback: candidates[1] || "",
+    candidates,
   };
 }
 
-function getOpenLibraryCoverImageUrl(isbn) {
-  if (isbn) {
-    return `https://covers.openlibrary.org/b/isbn/${encodeURIComponent(isbn)}-L.jpg`;
+function getOpenLibraryCoverImageUrls(_isbn, openLibraryMetadata) {
+  const candidates = [];
+  const coverId = openLibraryMetadata && openLibraryMetadata.coverId;
+
+  if (coverId) {
+    candidates.push(`https://covers.openlibrary.org/b/id/${encodeURIComponent(coverId)}-L.jpg`);
   }
 
-  return "";
+  if (openLibraryMetadata && openLibraryMetadata.coverUrl) {
+    candidates.push(openLibraryMetadata.coverUrl);
+  }
+
+  return normalizeCoverCandidates(candidates);
 }
 
 function upgradeGoogleCoverUrl(url) {
@@ -1276,19 +1309,6 @@ function upgradeGoogleCoverUrl(url) {
 
     if (/books\.google\./i.test(parsed.hostname) || /googleusercontent\.com$/i.test(parsed.hostname)) {
       parsed.searchParams.delete("edge");
-
-      if (parsed.searchParams.has("zoom")) {
-        parsed.searchParams.set("zoom", "0");
-      }
-
-      if (parsed.searchParams.has("fife")) {
-        parsed.searchParams.set("fife", "w800-h1200");
-      }
-
-      if (!parsed.searchParams.has("img")) {
-        parsed.searchParams.set("img", "1");
-      }
-
       return parsed.toString();
     }
   } catch (error) {
@@ -1307,7 +1327,7 @@ function resolveFormat(volumeInfo, openLibraryMetadata) {
 }
 
 async function fetchOpenLibraryMetadata(isbn) {
-  const emptyMetadata = { format: "", publisher: "" };
+  const emptyMetadata = { format: "", publisher: "", coverId: "", coverUrl: "" };
 
   if (!isbn) {
     return emptyMetadata;
@@ -1332,9 +1352,12 @@ async function fetchOpenLibraryMetadata(isbn) {
     const data = await response.json();
     const entry = data && data[`ISBN:${isbn}`];
     const details = entry && entry.details;
+    const coverId = getOpenLibraryCoverId(details);
     const metadata = {
       format: normalizeFormatValue(details && details.physical_format),
       publisher: normalizeOpenLibraryPublisher(details && details.publishers),
+      coverId,
+      coverUrl: normalizeOpenLibraryCoverUrl(entry && entry.thumbnail_url),
     };
 
     openLibraryMetadataCache[isbn] = metadata;
@@ -1342,6 +1365,34 @@ async function fetchOpenLibraryMetadata(isbn) {
   } catch (error) {
     openLibraryMetadataCache[isbn] = emptyMetadata;
     return emptyMetadata;
+  }
+}
+
+function getOpenLibraryCoverId(details) {
+  if (!details || !Array.isArray(details.covers) || !details.covers.length) {
+    return "";
+  }
+
+  const coverId = details.covers.find((value) => String(value || "").trim() !== "");
+  return coverId ? String(coverId).trim() : "";
+}
+
+function normalizeOpenLibraryCoverUrl(url) {
+  if (typeof url !== "string" || !url.trim()) {
+    return "";
+  }
+
+  const normalizedUrl = url.replace("http://", "https://");
+
+  try {
+    const parsed = new URL(normalizedUrl);
+    if (parsed.hostname !== "covers.openlibrary.org") {
+      return "";
+    }
+
+    return parsed.toString();
+  } catch (error) {
+    return "";
   }
 }
 
