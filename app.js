@@ -3,6 +3,15 @@ const state = {
   headers: [],
   enrichedRows: [],
   activeFilename: "enriched-books.csv",
+  scannedIsbns: [],
+  scannerStream: null,
+  scannerDetector: null,
+  scannerZxingControls: null,
+  scannerFrameId: 0,
+  scannerIsDetecting: false,
+  scannerLastValue: "",
+  scannerLastScanAt: 0,
+  scannerOpenRequestId: 0,
 };
 
 const csvFileInput = document.getElementById("csvFile");
@@ -16,6 +25,7 @@ const settingsClose = document.getElementById("settingsClose");
 const processButton = document.getElementById("processButton");
 const exportButton = document.getElementById("exportButton");
 const loadPasteButton = document.getElementById("loadPasteButton");
+const scanButton = document.getElementById("scanButton");
 const isbnPasteInput = document.getElementById("isbnPaste");
 const fileSummary = document.getElementById("fileSummary");
 const statusBanner = document.getElementById("statusBanner");
@@ -26,6 +36,15 @@ const tableSearchInput = document.getElementById("tableSearch");
 const uploadZone = document.querySelector(".upload-zone");
 const columnHint = document.getElementById("columnHint");
 const columnField = document.getElementById("columnField");
+const scannerModal = document.getElementById("scannerModal");
+const scannerBackdrop = document.getElementById("scannerBackdrop");
+const scannerClose = document.getElementById("scannerClose");
+const scannerVideo = document.getElementById("scannerVideo");
+const scannerStatus = document.getElementById("scannerStatus");
+const scannerList = document.getElementById("scannerList");
+const scannerCount = document.getElementById("scannerCount");
+const useScannedButton = document.getElementById("useScannedButton");
+const clearScannedButton = document.getElementById("clearScannedButton");
 
 const AUTHOR_METAFIELD = "Author (product.metafields.custom.author)";
 const PUBLICATION_DATE_METAFIELD = "Publication Date (product.metafields.custom.publication_date)";
@@ -68,6 +87,7 @@ const PREVIEW_COLUMN_LABELS = {
 
 const REQUEST_DELAY_MS = 350;
 const MAX_RETRIES = 4;
+const SCANNER_DUPLICATE_DELAY_MS = 1600;
 const openLibraryMetadataCache = {};
 
 clearLegacyStoredApiKey();
@@ -84,6 +104,10 @@ loadPasteButton.addEventListener("click", () => {
   loadPastedIsbns(isbnPasteInput.value);
 });
 
+scanButton.addEventListener("click", () => {
+  openScanner();
+});
+
 settingsToggle.addEventListener("click", () => {
   setSettingsOpen(true);
 });
@@ -94,6 +118,41 @@ settingsBackdrop.addEventListener("click", () => {
 
 settingsClose.addEventListener("click", () => {
   setSettingsOpen(false);
+});
+
+scannerBackdrop.addEventListener("click", () => {
+  closeScanner();
+});
+
+scannerClose.addEventListener("click", () => {
+  closeScanner();
+});
+
+useScannedButton.addEventListener("click", () => {
+  useScannedIsbns();
+});
+
+clearScannedButton.addEventListener("click", () => {
+  state.scannedIsbns = [];
+  renderScannedIsbns();
+  setScannerStatus("Ready to scan another book barcode.");
+});
+
+scannerList.addEventListener("click", (event) => {
+  const button = event.target.closest(".remove-scan");
+  if (!button) {
+    return;
+  }
+
+  const isbn = button.dataset.isbn;
+  state.scannedIsbns = state.scannedIsbns.filter((value) => value !== isbn);
+  renderScannedIsbns();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !scannerModal.classList.contains("hidden")) {
+    closeScanner();
+  }
 });
 
 tableSearchInput.addEventListener("input", () => {
@@ -290,6 +349,321 @@ function loadPastedIsbns(rawInput) {
   columnHint.textContent = "Column selection is skipped for pasted ISBN input.";
   previewMeta.textContent = `Loaded ${entries.length} ISBN${entries.length === 1 ? "" : "s"} from pasted text. Fetch book data when ready.`;
   setStatus("Pasted ISBNs loaded. Fetch book data to preview the results.", "info");
+}
+
+async function openScanner() {
+  if (!scannerModal.classList.contains("hidden") && state.scannerStream) {
+    return;
+  }
+
+  const requestId = state.scannerOpenRequestId + 1;
+  state.scannerOpenRequestId = requestId;
+  scannerModal.classList.remove("hidden");
+  scannerModal.setAttribute("aria-hidden", "false");
+  renderScannedIsbns();
+  setScannerStatus("Starting camera...");
+
+  if (!window.isSecureContext) {
+    setScannerStatus("Camera access requires HTTPS. Open the GitHub Pages HTTPS URL and try again.");
+    return;
+  }
+
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    setScannerStatus("This browser does not support camera access.");
+    return;
+  }
+
+  try {
+    const canUseNativeScanner = await canUseNativeBarcodeDetector();
+    if (requestId !== state.scannerOpenRequestId || scannerModal.classList.contains("hidden")) {
+      return;
+    }
+
+    if (canUseNativeScanner) {
+      await startNativeScanner(requestId);
+      return;
+    }
+
+    if (window.ZXingBrowser && window.ZXingBrowser.BrowserMultiFormatOneDReader) {
+      await startZxingScanner(requestId);
+      return;
+    }
+
+    setScannerStatus("This browser does not support barcode scanning. Paste ISBNs manually or try another browser.");
+  } catch (error) {
+    stopScannerStream();
+    setScannerStatus(getScannerErrorMessage(error));
+  }
+}
+
+async function canUseNativeBarcodeDetector() {
+  if (!("BarcodeDetector" in window)) {
+    return false;
+  }
+
+  const supportedFormats = typeof window.BarcodeDetector.getSupportedFormats === "function"
+    ? await window.BarcodeDetector.getSupportedFormats()
+    : ["ean_13"];
+
+  return !Array.isArray(supportedFormats) || !supportedFormats.length || supportedFormats.includes("ean_13");
+}
+
+async function startNativeScanner(requestId) {
+  state.scannerDetector = new window.BarcodeDetector({ formats: ["ean_13"] });
+  state.scannerStream = await getScannerStream();
+
+  if (requestId !== state.scannerOpenRequestId || scannerModal.classList.contains("hidden")) {
+    stopScannerStream();
+    return;
+  }
+
+  scannerVideo.srcObject = state.scannerStream;
+  await scannerVideo.play();
+
+  if (requestId !== state.scannerOpenRequestId || scannerModal.classList.contains("hidden")) {
+    stopScannerStream();
+    return;
+  }
+
+  setScannerStatus("Point the camera at a book barcode. Keep scanning to build the list.");
+  scanBarcodeFrame();
+}
+
+async function startZxingScanner(requestId) {
+  const reader = new window.ZXingBrowser.BrowserMultiFormatOneDReader(undefined, {
+    delayBetweenScanAttempts: 250,
+    delayBetweenScanSuccess: 900,
+  });
+  const constraints = {
+    audio: false,
+    video: {
+      facingMode: { ideal: "environment" },
+      width: { ideal: 1280 },
+      height: { ideal: 720 },
+    },
+  };
+
+  const handleDecode = (result, error) => {
+    if (result) {
+      handleScannedBarcodeValue(getZxingResultText(result));
+    } else if (error && isFatalZxingError(error)) {
+      setScannerStatus("Scanner paused after a camera read error. Close and reopen the scanner to try again.");
+    }
+  };
+
+  try {
+    state.scannerZxingControls = await reader.decodeFromConstraints(constraints, scannerVideo, handleDecode);
+  } catch (error) {
+    state.scannerZxingControls = await reader.decodeFromConstraints({ audio: false, video: true }, scannerVideo, handleDecode);
+  }
+
+  if (requestId !== state.scannerOpenRequestId || scannerModal.classList.contains("hidden")) {
+    stopScannerStream();
+    return;
+  }
+
+  state.scannerStream = scannerVideo.srcObject;
+  setScannerStatus("Point the camera at a book barcode. Keep scanning to build the list.");
+}
+
+async function getScannerStream() {
+  const preferredConstraints = {
+    audio: false,
+    video: {
+      facingMode: { ideal: "environment" },
+      width: { ideal: 1280 },
+      height: { ideal: 720 },
+    },
+  };
+
+  try {
+    return await navigator.mediaDevices.getUserMedia(preferredConstraints);
+  } catch (error) {
+    return navigator.mediaDevices.getUserMedia({ audio: false, video: true });
+  }
+}
+
+function scanBarcodeFrame() {
+  if (scannerModal.classList.contains("hidden") || !state.scannerDetector || !scannerVideo.srcObject) {
+    return;
+  }
+
+  if (!state.scannerIsDetecting && scannerVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+    state.scannerIsDetecting = true;
+    state.scannerDetector.detect(scannerVideo)
+      .then(handleBarcodeDetections)
+      .catch(() => {
+        setScannerStatus("Scanner paused after a camera read error. Close and reopen the scanner to try again.");
+      })
+      .finally(() => {
+        state.scannerIsDetecting = false;
+      });
+  }
+
+  state.scannerFrameId = window.requestAnimationFrame(scanBarcodeFrame);
+}
+
+function handleBarcodeDetections(detections) {
+  if (!Array.isArray(detections) || !detections.length) {
+    return;
+  }
+
+  const rawValue = detections
+    .map((detection) => detection && detection.rawValue)
+    .find(Boolean);
+  handleScannedBarcodeValue(rawValue);
+}
+
+function handleScannedBarcodeValue(rawValue) {
+  const isbn = normalizeScannedIsbn(rawValue);
+
+  if (!isbn) {
+    if (rawValue && rawValue !== state.scannerLastValue) {
+      state.scannerLastValue = rawValue;
+      setScannerStatus("Detected a barcode, but it was not an ISBN-13 book barcode.");
+    }
+    return;
+  }
+
+  const now = Date.now();
+  const repeatedTooSoon = isbn === state.scannerLastValue && now - state.scannerLastScanAt < SCANNER_DUPLICATE_DELAY_MS;
+  state.scannerLastValue = isbn;
+  state.scannerLastScanAt = now;
+
+  if (repeatedTooSoon) {
+    return;
+  }
+
+  if (state.scannedIsbns.includes(isbn)) {
+    setScannerStatus(`ISBN ${isbn} is already in the scanned list.`);
+    return;
+  }
+
+  state.scannedIsbns.push(isbn);
+  renderScannedIsbns();
+  setScannerStatus(`Scanned ISBN ${isbn}. Scan another barcode or use the list.`);
+}
+
+function getZxingResultText(result) {
+  if (!result) {
+    return "";
+  }
+
+  if (typeof result.getText === "function") {
+    return result.getText();
+  }
+
+  return result.text || "";
+}
+
+function isFatalZxingError(error) {
+  const name = error && (error.name || error.constructor && error.constructor.name);
+  return Boolean(name && !/NotFound|Checksum|Format/i.test(name));
+}
+
+function normalizeScannedIsbn(value) {
+  const isbn = normalizeIsbn(value);
+  if (!isbn || !/^97[89]/.test(isbn) || !hasValidIsbn13Checksum(isbn)) {
+    return "";
+  }
+
+  return isbn;
+}
+
+function hasValidIsbn13Checksum(isbn) {
+  if (!/^\d{13}$/.test(isbn)) {
+    return false;
+  }
+
+  const sum = isbn
+    .slice(0, 12)
+    .split("")
+    .reduce((total, digit, index) => {
+      return total + Number(digit) * (index % 2 === 0 ? 1 : 3);
+    }, 0);
+  const checkDigit = (10 - (sum % 10)) % 10;
+  return checkDigit === Number(isbn[12]);
+}
+
+function renderScannedIsbns() {
+  scannerCount.textContent = String(state.scannedIsbns.length);
+  useScannedButton.disabled = state.scannedIsbns.length === 0;
+  clearScannedButton.disabled = state.scannedIsbns.length === 0;
+  scannerList.innerHTML = state.scannedIsbns.map((isbn) => {
+    return `
+      <li>
+        <span>${escapeHtml(isbn)}</span>
+        <button class="remove-scan" type="button" data-isbn="${escapeAttribute(isbn)}" aria-label="Remove ISBN ${escapeAttribute(isbn)}">x</button>
+      </li>
+    `;
+  }).join("");
+}
+
+function useScannedIsbns() {
+  if (!state.scannedIsbns.length) {
+    return;
+  }
+
+  const existingIsbns = isbnPasteInput.value
+    .split(/[\n,]+/g)
+    .map(normalizeIsbn)
+    .filter(Boolean);
+  const mergedIsbns = Array.from(new Set(existingIsbns.concat(state.scannedIsbns)));
+  isbnPasteInput.value = mergedIsbns.join("\n");
+  closeScanner();
+  loadPastedIsbns(isbnPasteInput.value);
+}
+
+function closeScanner() {
+  state.scannerOpenRequestId += 1;
+  scannerModal.classList.add("hidden");
+  scannerModal.setAttribute("aria-hidden", "true");
+  stopScannerStream();
+}
+
+function stopScannerStream() {
+  if (state.scannerFrameId) {
+    window.cancelAnimationFrame(state.scannerFrameId);
+    state.scannerFrameId = 0;
+  }
+
+  if (state.scannerZxingControls && typeof state.scannerZxingControls.stop === "function") {
+    state.scannerZxingControls.stop();
+  }
+
+  if (state.scannerStream) {
+    state.scannerStream.getTracks().forEach((track) => track.stop());
+  }
+
+  state.scannerStream = null;
+  state.scannerDetector = null;
+  state.scannerZxingControls = null;
+  state.scannerIsDetecting = false;
+  state.scannerLastValue = "";
+  state.scannerLastScanAt = 0;
+  scannerVideo.pause();
+  scannerVideo.srcObject = null;
+  setScannerStatus("Camera is not running.");
+}
+
+function setScannerStatus(message) {
+  scannerStatus.textContent = message;
+}
+
+function getScannerErrorMessage(error) {
+  if (error && error.name === "NotAllowedError") {
+    return "Camera permission was blocked. Allow camera access in the browser and try again.";
+  }
+
+  if (error && error.name === "NotFoundError") {
+    return "No camera was found on this device.";
+  }
+
+  if (error && error.name === "NotReadableError") {
+    return "The camera is already in use by another app or browser tab.";
+  }
+
+  return "Unable to start the camera scanner.";
 }
 
 function resetUi() {
