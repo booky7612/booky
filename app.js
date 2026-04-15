@@ -31,39 +31,44 @@ const AUTHOR_METAFIELD = "Author (product.metafields.custom.author)";
 const PUBLICATION_DATE_METAFIELD = "Publication Date (product.metafields.custom.publication_date)";
 const PUBLISHER_METAFIELD = "Publisher (product.metafields.custom.publisher)";
 const PAGE_COUNT_METAFIELD = "Page Count (product.metafields.custom.page_count)";
+const DIMENSIONS_METAFIELD = "Dimensions (product.metafields.custom.dimensions)";
 const TRANSLATOR_METAFIELD = "Translator (product.metafields.custom.translator)";
 const FORMAT_METAFIELD = "Format (product.metafields.custom.format)";
 
 const OUTPUT_COLUMNS = [
-  "Handle",
   "Title",
   "Body (HTML)",
-  "Type",
-  "Option1 Name",
-  "Option1 Value",
-  "Image Src",
   AUTHOR_METAFIELD,
-  PUBLICATION_DATE_METAFIELD,
+  "Image Src",
   PUBLISHER_METAFIELD,
+  "Type",
+  PUBLICATION_DATE_METAFIELD,
   PAGE_COUNT_METAFIELD,
+  DIMENSIONS_METAFIELD,
   TRANSLATOR_METAFIELD,
   FORMAT_METAFIELD,
+  "Option1 Name",
+  "Option1 Value",
+  "Handle",
 ];
 
 const PREVIEW_COLUMN_LABELS = {
   "Body (HTML)": "Description",
   "Image Src": "Cover",
+  "Option1 Name": "Option Name",
+  "Option1 Value": "Option Value",
   [AUTHOR_METAFIELD]: "Author",
   [PUBLICATION_DATE_METAFIELD]: "Publication Date",
   [PUBLISHER_METAFIELD]: "Publisher",
   [PAGE_COUNT_METAFIELD]: "Page Count",
+  [DIMENSIONS_METAFIELD]: "Dimensions",
   [TRANSLATOR_METAFIELD]: "Translator",
   [FORMAT_METAFIELD]: "Format",
 };
 
 const REQUEST_DELAY_MS = 350;
 const MAX_RETRIES = 4;
-const openLibraryFormatCache = {};
+const openLibraryMetadataCache = {};
 
 clearLegacyStoredApiKey();
 renderPreviewHeader();
@@ -332,12 +337,15 @@ function renderPreview(rows) {
   const fragment = document.createDocumentFragment();
   rows.forEach((row, index) => {
     const tr = document.createElement("tr");
+    const rowId = ensureRowId(row);
+    tr.dataset.rowId = rowId;
     tr.innerHTML = OUTPUT_COLUMNS.map((column) => renderPreviewCell(column, row, index)).join("");
     fragment.appendChild(tr);
   });
 
   previewBody.appendChild(fragment);
   attachDescriptionToggles();
+  attachCoverFallbacks();
   previewMeta.textContent = buildPreviewMeta(rows.length);
 }
 
@@ -369,25 +377,71 @@ function renderPreviewCell(column, row, index) {
   }
 
   if (column === "Image Src") {
-    return `<td class="media-cell">${renderMediaCell(row[column], row["Title"])}</td>`;
+    return `<td class="media-cell">${renderMediaCell(row[column], row["Title"], row["Cover Fallback URL"])}</td>`;
   }
 
   return `<td>${escapeHtml(row[column])}</td>`;
 }
 
-function renderMediaCell(url, title) {
+function renderMediaCell(url, title, fallbackUrl) {
   if (!url) {
     return "";
   }
 
   const safeUrl = escapeAttribute(url);
+  const safeFallbackUrl = fallbackUrl ? escapeAttribute(fallbackUrl) : "";
   const safeTitle = escapeAttribute(title || "Book cover");
+  const fallbackAttribute = safeFallbackUrl ? ` data-fallback-src="${safeFallbackUrl}"` : "";
+
   return `
     <a class="cover-tile" href="${safeUrl}" target="_blank" rel="noreferrer">
-      <img src="${safeUrl}" alt="${safeTitle}">
+      <img src="${safeUrl}" alt="${safeTitle}"${fallbackAttribute}>
       <span>Open cover</span>
     </a>
   `;
+}
+
+function attachCoverFallbacks() {
+  const coverImages = previewBody.querySelectorAll("img[data-fallback-src]");
+  coverImages.forEach((image) => {
+    image.addEventListener("error", () => {
+      const fallbackSrc = image.getAttribute("data-fallback-src");
+      if (!fallbackSrc || image.src === fallbackSrc) {
+        return;
+      }
+
+      image.removeAttribute("data-fallback-src");
+      image.src = fallbackSrc;
+
+      const link = image.closest("a");
+      if (link) {
+        link.href = fallbackSrc;
+      }
+
+      const tableRow = image.closest("tr");
+      const row = tableRow ? findEnrichedRowById(tableRow.dataset.rowId) : null;
+      if (row) {
+        row["Image Src"] = fallbackSrc;
+        row["Cover Fallback URL"] = "";
+      }
+    }, { once: true });
+  });
+}
+
+function ensureRowId(row) {
+  if (!row.__bookyRowId) {
+    row.__bookyRowId = `row-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  }
+
+  return row.__bookyRowId;
+}
+
+function findEnrichedRowById(rowId) {
+  if (!rowId) {
+    return null;
+  }
+
+  return state.enrichedRows.find((row) => row.__bookyRowId === rowId) || null;
 }
 
 async function fetchBookByIsbn(isbn) {
@@ -466,14 +520,16 @@ async function buildBookResult(isbn, item) {
   const identifiers = volumeInfo.industryIdentifiers || [];
   const isbn13Entry = identifiers.find((entry) => entry.type === "ISBN_13");
   const outputIsbn = (isbn13Entry && isbn13Entry.identifier) || isbn;
+  const openLibraryMetadata = await fetchOpenLibraryMetadata(outputIsbn);
   const title = volumeInfo.title || `ISBN ${outputIsbn}`;
   const description = cleanDescription(volumeInfo.description);
   const author = Array.isArray(volumeInfo.authors) ? volumeInfo.authors.join(", ") : "";
   const publicationDate = formatPublicationDate(volumeInfo.publishedDate);
-  const publisher = volumeInfo.publisher || "";
+  const publisher = normalizePublisherValue(volumeInfo.publisher) || openLibraryMetadata.publisher;
   const translator = extractTranslator(volumeInfo);
-  const format = await resolveFormat(outputIsbn, volumeInfo);
-  const coverImageUrl = buildConsistentCoverImageUrl(outputIsbn, volumeInfo.imageLinks || {});
+  const format = resolveFormat(volumeInfo, openLibraryMetadata);
+  const bookSize = formatBookSize(volumeInfo.dimensions);
+  const coverImageUrls = buildCoverImageUrls(outputIsbn, volumeInfo.imageLinks || {});
 
   return {
     found: true,
@@ -484,11 +540,13 @@ async function buildBookResult(isbn, item) {
       "Type": "Book",
       "Option1 Name": "Title",
       "Option1 Value": "Default Title",
-      "Image Src": coverImageUrl,
+      "Image Src": coverImageUrls.primary,
+      "Cover Fallback URL": coverImageUrls.fallback,
       [AUTHOR_METAFIELD]: author,
       [PUBLICATION_DATE_METAFIELD]: publicationDate,
       [PUBLISHER_METAFIELD]: publisher,
       [PAGE_COUNT_METAFIELD]: volumeInfo.pageCount ? String(volumeInfo.pageCount) : "",
+      [DIMENSIONS_METAFIELD]: bookSize,
       [TRANSLATOR_METAFIELD]: translator,
       [FORMAT_METAFIELD]: format,
     },
@@ -506,13 +564,42 @@ function buildEmptyRow(isbn, descriptionFallback) {
     "Option1 Name": "Title",
     "Option1 Value": "Default Title",
     "Image Src": "",
+    "Cover Fallback URL": "",
     [AUTHOR_METAFIELD]: "",
     [PUBLICATION_DATE_METAFIELD]: "",
     [PUBLISHER_METAFIELD]: "",
     [PAGE_COUNT_METAFIELD]: "",
+    [DIMENSIONS_METAFIELD]: "",
     [TRANSLATOR_METAFIELD]: "",
     [FORMAT_METAFIELD]: "",
   };
+}
+
+function formatBookSize(dimensions) {
+  if (!dimensions || typeof dimensions !== "object") {
+    return "";
+  }
+
+  const parts = [
+    ["H", dimensions.height],
+    ["W", dimensions.width],
+    ["T", dimensions.thickness],
+  ]
+    .map(([label, value]) => {
+      const dimension = normalizeDimensionValue(value);
+      return dimension ? `${label} ${dimension}` : "";
+    })
+    .filter(Boolean);
+
+  return parts.join(" x ");
+}
+
+function normalizeDimensionValue(value) {
+  const dimension = String(getValue(value, ""))
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return dimension;
 }
 
 function normalizeIsbn(value) {
@@ -789,12 +876,22 @@ function getBestCoverImageUrl(imageLinks) {
   return upgradeGoogleCoverUrl(firstAvailable);
 }
 
-function buildConsistentCoverImageUrl(isbn, imageLinks) {
+function buildCoverImageUrls(isbn, imageLinks) {
+  const googleCoverUrl = getBestCoverImageUrl(imageLinks);
+  const openLibraryCoverUrl = getOpenLibraryCoverImageUrl(isbn);
+
+  return {
+    primary: googleCoverUrl || openLibraryCoverUrl,
+    fallback: googleCoverUrl ? openLibraryCoverUrl : "",
+  };
+}
+
+function getOpenLibraryCoverImageUrl(isbn) {
   if (isbn) {
     return `https://covers.openlibrary.org/b/isbn/${encodeURIComponent(isbn)}-L.jpg`;
   }
 
-  return getBestCoverImageUrl(imageLinks);
+  return "";
 }
 
 function upgradeGoogleCoverUrl(url) {
@@ -827,22 +924,23 @@ function upgradeGoogleCoverUrl(url) {
   return normalizedUrl;
 }
 
-async function resolveFormat(isbn, volumeInfo) {
-  const openLibraryFormat = await fetchOpenLibraryFormat(isbn);
-  if (openLibraryFormat) {
-    return openLibraryFormat;
+function resolveFormat(volumeInfo, openLibraryMetadata) {
+  if (openLibraryMetadata && openLibraryMetadata.format) {
+    return openLibraryMetadata.format;
   }
 
   return inferFormat(volumeInfo);
 }
 
-async function fetchOpenLibraryFormat(isbn) {
+async function fetchOpenLibraryMetadata(isbn) {
+  const emptyMetadata = { format: "", publisher: "" };
+
   if (!isbn) {
-    return "";
+    return emptyMetadata;
   }
 
-  if (Object.prototype.hasOwnProperty.call(openLibraryFormatCache, isbn)) {
-    return openLibraryFormatCache[isbn];
+  if (Object.prototype.hasOwnProperty.call(openLibraryMetadataCache, isbn)) {
+    return openLibraryMetadataCache[isbn];
   }
 
   try {
@@ -853,20 +951,23 @@ async function fetchOpenLibraryFormat(isbn) {
 
     const response = await fetch(url.toString(), buildRequestOptions());
     if (!response.ok) {
-      openLibraryFormatCache[isbn] = "";
-      return "";
+      openLibraryMetadataCache[isbn] = emptyMetadata;
+      return emptyMetadata;
     }
 
     const data = await response.json();
     const entry = data && data[`ISBN:${isbn}`];
     const details = entry && entry.details;
-    const physicalFormat = normalizeFormatValue(details && details.physical_format);
+    const metadata = {
+      format: normalizeFormatValue(details && details.physical_format),
+      publisher: normalizeOpenLibraryPublisher(details && details.publishers),
+    };
 
-    openLibraryFormatCache[isbn] = physicalFormat;
-    return physicalFormat;
+    openLibraryMetadataCache[isbn] = metadata;
+    return metadata;
   } catch (error) {
-    openLibraryFormatCache[isbn] = "";
-    return "";
+    openLibraryMetadataCache[isbn] = emptyMetadata;
+    return emptyMetadata;
   }
 }
 
@@ -888,14 +989,7 @@ function inferFormat(volumeInfo) {
     .join(" ")
     .toLowerCase();
 
-  if (/\bpaperback\b/.test(candidates)) {
-    return "Paperback";
-  }
-  if (/\bhardback\b/.test(candidates) || /\bhardcover\b/.test(candidates)) {
-    return "Hardback";
-  }
-
-  return "";
+  return normalizeFormatValue(candidates);
 }
 
 function normalizeFormatValue(value) {
@@ -904,14 +998,65 @@ function normalizeFormatValue(value) {
     return "";
   }
 
-  if (text.includes("paperback")) {
+  if (/\bmass[-\s]?market\b/.test(text) && /\bpaperback\b/.test(text)) {
+    return "Mass Market Paperback";
+  }
+  if (/\btrade\b/.test(text) && /\bpaperback\b/.test(text)) {
+    return "Trade Paperback";
+  }
+  if (/\bpaperback\b/.test(text) || /\bsoftcover\b/.test(text) || /\bsoft cover\b/.test(text)) {
     return "Paperback";
   }
-  if (text.includes("hardback") || text.includes("hardcover")) {
-    return "Hardback";
+  if (/\bhardback\b/.test(text) || /\bhardcover\b/.test(text) || /\bhard cover\b/.test(text) || /\blibrary binding\b/.test(text)) {
+    return "Hardcover";
+  }
+  if (/\bboard book\b/.test(text)) {
+    return "Board Book";
+  }
+  if (/\bleather(?:ette)?\b/.test(text)) {
+    return "Leather Bound";
+  }
+  if (/\bspiral[-\s]?bound\b/.test(text)) {
+    return "Spiral Bound";
+  }
+  if (/\bloose[-\s]?leaf\b/.test(text)) {
+    return "Loose Leaf";
+  }
+  if (/\baudio(?:book)?\b/.test(text) || /\bcd\b/.test(text)) {
+    return "Audiobook";
+  }
+  if (/\be[-\s]?book\b/.test(text) || /\bkindle\b/.test(text) || /\bdigital\b/.test(text)) {
+    return "Ebook";
   }
 
   return "";
+}
+
+function normalizePublisherValue(value) {
+  const publisher = String(getValue(value, ""))
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!publisher) {
+    return "";
+  }
+
+  return publisher;
+}
+
+function normalizeOpenLibraryPublisher(value) {
+  const publishers = Array.isArray(value) ? value : [value];
+  const normalized = publishers
+    .map((publisher) => {
+      if (publisher && typeof publisher === "object") {
+        return normalizePublisherValue(publisher.name);
+      }
+
+      return normalizePublisherValue(publisher);
+    })
+    .filter(Boolean);
+
+  return Array.from(new Set(normalized)).join(", ");
 }
 
 function cleanDescription(value) {
