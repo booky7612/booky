@@ -46,6 +46,20 @@ GitHub Pages serves these files directly:
 
 The local launcher files can remain in the repository. GitHub Pages ignores them.
 
+## Host as a web service
+
+Static hosting is the best fit for Booky. If a platform such as Render, Railway,
+or Fly treats the project as a Python web service, use this start command:
+
+```bash
+python server.py
+```
+
+The server reads the platform-provided `PORT` environment variable and binds to
+`0.0.0.0` during hosted deployments so external health checks can reach it. For
+local runs without `PORT`, it still serves on `127.0.0.1:8000` and opens the
+browser automatically.
+
 ## API key security
 
 Booky has no hardcoded API key. Each user enters their own Google Books API key in the settings modal.
@@ -102,7 +116,7 @@ Then open `http://127.0.0.1:8000/` if your browser does not open automatically.
 - Barcode scanning uses the device camera over HTTPS and prefers the rear camera when the browser exposes one. It scans EAN-13 book barcodes, validates `978` or `979` ISBN-13 values, and adds unique scans to the ISBN list before metadata lookup.
 - The scanner uses the browser's native `BarcodeDetector` API when available and falls back to the local ZXing bundle for browsers such as Safari on iPhone and iPad.
 - Google Books metadata varies by title. `Translator`, `Format`, dimensions, page count, and cover art may be blank if Google does not return them.
-- Cover exports prefer Google Books image URLs when available, then fall back to Open Library ISBN cover URLs. The browser preview also tries the fallback image if the primary cover fails to load.
+- Cover exports prefer Open Library cover IDs when metadata confirms a cover exists, then fall back to Google Books image URLs without rewriting Google image sizing parameters. The browser preview also tries remaining candidate images if the primary cover fails to load.
 - If the browser preview successfully switches a broken cover to its fallback image, the exported `Image Src` is updated to that working fallback URL.
 - Format uses Open Library edition metadata when available, then falls back to binding words found in Google Books title, subtitle, or description text.
 - The exported CSV uses Shopify product column names and `product.metafields.custom.*` metafield headers.
