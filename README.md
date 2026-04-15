@@ -15,13 +15,13 @@ Static browser app for turning either a CSV column of ISBN values or a pasted IS
 - Paste ISBN values directly as comma-separated or line-separated text
 - Choose which column contains ISBN-13 values
 - Build a Shopify product CSV with:
-  - Core Shopify columns such as `Title`, `Description`, `Type`, and `Product image URL`
-  - `Product image URL` for book cover imports
-  - Product metafield columns for `Author`, `Publication Date`, `Publisher`, `Page Count`, `Translator`, and `Format`
+  - Core Shopify columns such as `Title`, `Body (HTML)`, `Type`, `Option1 Name`, `Option1 Value`, `Image Src`, and `Handle`
+  - `Image Src` for book cover imports
+  - Product metafield columns for `Author`, `Publication Date`, `Publisher`, `Page Count`, `Dimensions`, `Translator`, and `Format`
 - Preview the results in the browser with:
   - Search across all fields
   - Expand/collapse descriptions
-  - Cover thumbnails in the `Product image URL` column
+  - Cover thumbnails in the `Image Src` column
 - Export the preview as a new CSV file
 - Use a user-provided Google Books API key for the current browser tab only
 
@@ -97,7 +97,14 @@ Then open `http://127.0.0.1:8000/` if your browser does not open automatically.
 
 - The app expects ISBN-13 values. It accepts digits with optional hyphens or spaces.
 - Pasted input accepts commas, new lines, or a mix of both as separators.
-- Google Books metadata varies by title. `Translator`, `Format`, page count, and cover art may be blank if Google does not return them.
+- Google Books metadata varies by title. `Translator`, `Format`, dimensions, page count, and cover art may be blank if Google does not return them.
+- Cover exports prefer Google Books image URLs when available, then fall back to Open Library ISBN cover URLs. The browser preview also tries the fallback image if the primary cover fails to load.
+- If the browser preview successfully switches a broken cover to its fallback image, the exported `Image Src` is updated to that working fallback URL.
+- Format uses Open Library edition metadata when available, then falls back to binding words found in Google Books title, subtitle, or description text.
 - The exported CSV uses Shopify product column names and `product.metafields.custom.*` metafield headers.
+- Every exported row includes `Option1 Name` as `Title` and `Option1 Value` as `Default Title`, which keeps Shopify's product option import requirements satisfied for books with no real variants.
+- Create the product metafields in Shopify before importing this CSV. The exported metadata values are plain text, so `single line text` metafields are the safest default for Author, Publication Date, Publisher, Page Count, Dimensions, Translator, and Format.
+- The export intentionally omits commerce fields such as price, inventory, vendor, tax, and publication status. Shopify applies its own defaults for omitted fields, so review imported products before publishing or selling them.
+- When Google Books returns dimensions, the export stores them in `Dimensions (product.metafields.custom.dimensions)`.
 - When running locally with `server.py`, stop the terminal process with `Ctrl+C`.
 - Exported CSV contains only the enriched output columns shown in the preview.
