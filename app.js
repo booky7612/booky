@@ -55,25 +55,25 @@ const DIMENSIONS_METAFIELD = "Dimensions (product.metafields.custom.dimensions)"
 const TRANSLATOR_METAFIELD = "Translator (product.metafields.custom.translator)";
 const FORMAT_METAFIELD = "Format (product.metafields.custom.format)";
 
-const OUTPUT_COLUMNS = [
-  "Title",
-  "Body (HTML)",
-  AUTHOR_METAFIELD,
-  "Image Src",
-  PUBLISHER_METAFIELD,
-  "Type",
-  PUBLICATION_DATE_METAFIELD,
-  PAGE_COUNT_METAFIELD,
-  DIMENSIONS_METAFIELD,
-  TRANSLATOR_METAFIELD,
-  FORMAT_METAFIELD,
-  ISBN_METAFIELD,
-  "Option1 Name",
-  "Option1 Value",
-  "Variant Barcode",
-  "Handle",
-  "Vendor",
-];
+  const OUTPUT_COLUMNS = [
+    "Title",
+    "Body (HTML)",
+    AUTHOR_METAFIELD,
+    "Image Src",
+    PUBLISHER_METAFIELD,
+    "Type",
+    PUBLICATION_DATE_METAFIELD,
+    PAGE_COUNT_METAFIELD,
+    DIMENSIONS_METAFIELD,
+    TRANSLATOR_METAFIELD,
+    FORMAT_METAFIELD,
+    "Option1 Name",
+    "Option1 Value",
+    "Variant Barcode",
+    "Handle",
+    "Vendor",
+    ISBN_METAFIELD,
+  ];
 
 const PREVIEW_COLUMN_LABELS = {
   "Body (HTML)": "Description",
