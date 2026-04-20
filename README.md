@@ -17,6 +17,7 @@ Static browser app for turning either a CSV column of ISBN values or a pasted IS
 - Choose which column contains ISBN-13 values
 - Build a Shopify product CSV with:
   - Core Shopify columns such as `Title`, `Body (HTML)`, `Type`, `Option1 Name`, `Option1 Value`, `Image Src`, and `Handle`
+  - Shopify `Tags` populated with genres/subjects when available
   - `Image Src` for book cover imports
   - Product metafield columns for `Author`, `Publication Date`, `Publisher`, `Page Count`, `Dimensions`, `Translator`, and `Format`
 - Preview the results in the browser with:
@@ -116,6 +117,7 @@ Then open `http://127.0.0.1:8000/` if your browser does not open automatically.
 - Barcode scanning uses the device camera over HTTPS and prefers the rear camera when the browser exposes one. It scans EAN-13 book barcodes, validates `978` or `979` ISBN-13 values, and adds unique scans to the ISBN list before metadata lookup.
 - The scanner uses the browser's native `BarcodeDetector` API when available and falls back to the local ZXing bundle for browsers such as Safari on iPhone and iPad.
 - Google Books metadata varies by title. `Translator`, `Format`, dimensions, page count, and cover art may be blank if Google does not return them.
+- Genre tags come only from Google Books `categories`, so some books will export with blank `Tags` when Google does not provide category data.
 - Cover exports prefer Open Library cover IDs when metadata confirms a cover exists, then fall back to Google Books image URLs without rewriting Google image sizing parameters. The browser preview also tries remaining candidate images if the primary cover fails to load.
 - If the browser preview successfully switches a broken cover to its fallback image, the exported `Image Src` is updated to that working fallback URL.
 - Format uses Open Library edition metadata when available, then falls back to binding words found in Google Books title, subtitle, or description text.
