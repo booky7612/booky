@@ -65,11 +65,11 @@ const OUTPUT_COLUMNS = [
   DIMENSIONS_METAFIELD,
   TRANSLATOR_METAFIELD,
   FORMAT_METAFIELD,
-  "Vendor",
   AUTHOR_METAFIELD,
   "Option1 Name",
   "Option1 Value",
   "Handle",
+  "Vendor",
 ];
 
 const PREVIEW_COLUMN_LABELS = {
