@@ -122,7 +122,7 @@ Then open `http://127.0.0.1:8000/` if your browser does not open automatically.
 - The exported CSV uses Shopify product column names and `product.metafields.custom.*` metafield headers.
 - Every exported row includes `Option1 Name` as `Title` and `Option1 Value` as `Default Title`, which keeps Shopify's product option import requirements satisfied for books with no real variants.
 - Create the product metafields in Shopify before importing this CSV. The exported metadata values are plain text, so `single line text` metafields are the safest default for Author, Publication Date, Publisher, Page Count, Dimensions, Translator, and Format.
-- The export intentionally omits commerce fields such as price, inventory, vendor, tax, and publication status. Shopify applies its own defaults for omitted fields, so review imported products before publishing or selling them.
+- The export intentionally omits commerce fields such as price, inventory, tax, and publication status. The `Vendor` column is populated from the author name so Shopify can import the author as the product vendor. Review imported products before publishing or selling them.
 - When Google Books returns dimensions, the export stores them in `Dimensions (product.metafields.custom.dimensions)`.
 - When running locally with `server.py`, stop the terminal process with `Ctrl+C`.
 - Exported CSV contains only the enriched output columns shown in the preview.
