@@ -57,8 +57,6 @@ const FORMAT_METAFIELD = "Format (product.metafields.custom.format)";
 const OUTPUT_COLUMNS = [
   "Title",
   "Body (HTML)",
-  "Vendor",
-  AUTHOR_METAFIELD,
   "Image Src",
   PUBLISHER_METAFIELD,
   "Type",
@@ -67,6 +65,8 @@ const OUTPUT_COLUMNS = [
   DIMENSIONS_METAFIELD,
   TRANSLATOR_METAFIELD,
   FORMAT_METAFIELD,
+  "Vendor",
+  AUTHOR_METAFIELD,
   "Option1 Name",
   "Option1 Value",
   "Handle",
