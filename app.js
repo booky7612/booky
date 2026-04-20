@@ -55,6 +55,7 @@ const PAGE_COUNT_METAFIELD = "Page Count (product.metafields.custom.page_count)"
 const DIMENSIONS_METAFIELD = "Dimensions (product.metafields.custom.dimensions)";
 const TRANSLATOR_METAFIELD = "Translator (product.metafields.custom.translator)";
 const FORMAT_METAFIELD = "Format (product.metafields.custom.format)";
+const TAGS_COLUMN = "Tags";
 
 const OUTPUT_COLUMNS = [
   "Title",
@@ -74,12 +75,14 @@ const OUTPUT_COLUMNS = [
   "Variant Barcode",
   "Handle",
   "Vendor",
+  TAGS_COLUMN,
 ];
 
 const PREVIEW_COLUMN_LABELS = {
   "Body (HTML)": "Description",
   "Vendor": "Vendor",
   "Image Src": "Cover",
+  [TAGS_COLUMN]: "Tags",
   "Option1 Name": "Option Name",
   "Option1 Value": "Option Value",
   [AUTHOR_METAFIELD]: "Author",
@@ -1022,6 +1025,7 @@ async function buildBookResult(isbn, item) {
   const publisher = normalizePublisherValue(volumeInfo.publisher) || openLibraryMetadata.publisher;
   const translator = extractTranslator(volumeInfo);
   const format = resolveFormat(volumeInfo, openLibraryMetadata);
+  const genres = resolveGenres(volumeInfo, openLibraryMetadata);
   const bookSize = formatBookSize(volumeInfo.dimensions);
   const coverImageUrls = buildCoverImageUrls(outputIsbn, volumeInfo.imageLinks || {}, openLibraryMetadata);
 
@@ -1036,6 +1040,7 @@ async function buildBookResult(isbn, item) {
       "Option1 Name": "Title",
       "Option1 Value": "Default Title",
       "Variant Barcode": outputIsbn,
+      [TAGS_COLUMN]: genres.join(", "),
       "Image Src": coverImageUrls.primary,
       "Cover Fallback URL": coverImageUrls.fallback,
       __coverCandidates: coverImageUrls.candidates,
@@ -1063,6 +1068,7 @@ function buildEmptyRow(isbn, descriptionFallback) {
     "Option1 Name": "Title",
     "Option1 Value": "Default Title",
     "Variant Barcode": normalizedIsbn || "",
+    [TAGS_COLUMN]: "",
     "Image Src": "",
     "Cover Fallback URL": "",
     [AUTHOR_METAFIELD]: "",
@@ -1454,8 +1460,46 @@ function resolveFormat(volumeInfo, openLibraryMetadata) {
   return inferFormat(volumeInfo);
 }
 
+function resolveGenres(volumeInfo, openLibraryMetadata) {
+  const googleCategories = Array.isArray(volumeInfo && volumeInfo.categories) ? volumeInfo.categories : [];
+
+  return Array.from(new Set(
+    googleCategories
+      .flatMap((value) => splitGenreCandidates(value))
+      .map(normalizeGenreValue)
+      .filter(Boolean),
+  ));
+}
+
+function splitGenreCandidates(value) {
+  const text = String(getValue(value, ""))
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) {
+    return [];
+  }
+
+  return text
+    .split(/\s*(?:\/|>|;|\|)\s*/g)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function normalizeGenreValue(value) {
+  const normalized = String(getValue(value, ""))
+    .replace(/\s+/g, " ")
+    .replace(/\s*&\s*/g, " & ")
+    .trim();
+
+  if (!normalized) {
+    return "";
+  }
+
+  return normalized;
+}
+
 async function fetchOpenLibraryMetadata(isbn) {
-  const emptyMetadata = { format: "", publisher: "", coverId: "", coverUrl: "" };
+  const emptyMetadata = { format: "", publisher: "", subjects: [], coverId: "", coverUrl: "" };
 
   if (!isbn) {
     return emptyMetadata;
@@ -1484,6 +1528,7 @@ async function fetchOpenLibraryMetadata(isbn) {
     const metadata = {
       format: normalizeFormatValue(details && details.physical_format),
       publisher: normalizeOpenLibraryPublisher(details && details.publishers),
+      subjects: normalizeOpenLibrarySubjects(details && details.subjects),
       coverId,
       coverUrl: normalizeOpenLibraryCoverUrl(entry && entry.thumbnail_url),
     };
@@ -1610,6 +1655,20 @@ function normalizeOpenLibraryPublisher(value) {
     .filter(Boolean);
 
   return Array.from(new Set(normalized)).join(", ");
+}
+
+function normalizeOpenLibrarySubjects(value) {
+  const subjects = Array.isArray(value) ? value : [value];
+
+  return Array.from(new Set(subjects
+    .map((subject) => {
+      if (subject && typeof subject === "object") {
+        return String(getValue(subject.name, "")).trim();
+      }
+
+      return String(getValue(subject, "")).trim();
+    })
+    .filter(Boolean)));
 }
 
 function cleanDescription(value) {
