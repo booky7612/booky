@@ -367,6 +367,19 @@ textarea {
   color: var(--forest-deep);
 }
 
+.button.minimal {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  padding-inline: 8px;
+  box-shadow: none;
+}
+
+.button.minimal:hover:not(:disabled) {
+  color: var(--forest-deep);
+  background: rgba(35, 71, 52, 0.05);
+}
+
 .button.ghost {
   border: 1px solid rgba(184, 149, 69, 0.26);
   background: rgba(255, 253, 248, 0.72);
