@@ -57,6 +57,7 @@ const FORMAT_METAFIELD = "Format (product.metafields.custom.format)";
 const OUTPUT_COLUMNS = [
   "Title",
   "Body (HTML)",
+  "Vendor",
   AUTHOR_METAFIELD,
   "Image Src",
   PUBLISHER_METAFIELD,
@@ -73,6 +74,7 @@ const OUTPUT_COLUMNS = [
 
 const PREVIEW_COLUMN_LABELS = {
   "Body (HTML)": "Description",
+  "Vendor": "Vendor",
   "Image Src": "Cover",
   "Option1 Name": "Option Name",
   "Option1 Value": "Option Value",
@@ -939,6 +941,7 @@ async function buildBookResult(isbn, item) {
       "Handle": buildShopifyHandle(title, outputIsbn),
       "Title": title,
       "Body (HTML)": description,
+      "Vendor": author,
       "Type": "Book",
       "Option1 Name": "Title",
       "Option1 Value": "Default Title",
@@ -963,6 +966,7 @@ function buildEmptyRow(isbn, descriptionFallback) {
     "Handle": buildShopifyHandle("", normalizedIsbn || isbn),
     "Title": normalizedIsbn ? `ISBN ${normalizedIsbn}` : "Book",
     "Body (HTML)": descriptionFallback || "",
+    "Vendor": "",
     "Type": "Book",
     "Option1 Name": "Title",
     "Option1 Value": "Default Title",
