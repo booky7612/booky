@@ -24,6 +24,7 @@ const settingsBackdrop = document.getElementById("settingsBackdrop");
 const settingsClose = document.getElementById("settingsClose");
 const processButton = document.getElementById("processButton");
 const exportButton = document.getElementById("exportButton");
+const rerunFailedButton = document.getElementById("rerunFailedButton");
 const loadPasteButton = document.getElementById("loadPasteButton");
 const scanButton = document.getElementById("scanButton");
 const isbnPasteInput = document.getElementById("isbnPaste");
@@ -55,25 +56,25 @@ const DIMENSIONS_METAFIELD = "Dimensions (product.metafields.custom.dimensions)"
 const TRANSLATOR_METAFIELD = "Translator (product.metafields.custom.translator)";
 const FORMAT_METAFIELD = "Format (product.metafields.custom.format)";
 
-  const OUTPUT_COLUMNS = [
-    "Title",
-    "Body (HTML)",
-    AUTHOR_METAFIELD,
-    "Image Src",
-    PUBLISHER_METAFIELD,
-    "Type",
-    PUBLICATION_DATE_METAFIELD,
-    PAGE_COUNT_METAFIELD,
-    DIMENSIONS_METAFIELD,
-    TRANSLATOR_METAFIELD,
-    FORMAT_METAFIELD,
-    "Option1 Name",
-    "Option1 Value",
-    "Variant Barcode",
-    "Handle",
-    "Vendor",
-    ISBN_METAFIELD,
-  ];
+const OUTPUT_COLUMNS = [
+  "Title",
+  "Body (HTML)",
+  AUTHOR_METAFIELD,
+  ISBN_METAFIELD,
+  "Image Src",
+  PUBLISHER_METAFIELD,
+  "Type",
+  PUBLICATION_DATE_METAFIELD,
+  PAGE_COUNT_METAFIELD,
+  DIMENSIONS_METAFIELD,
+  TRANSLATOR_METAFIELD,
+  FORMAT_METAFIELD,
+  "Option1 Name",
+  "Option1 Value",
+  "Variant Barcode",
+  "Handle",
+  "Vendor",
+];
 
 const PREVIEW_COLUMN_LABELS = {
   "Body (HTML)": "Description",
@@ -95,6 +96,7 @@ const REQUEST_DELAY_MS = 350;
 const MAX_RETRIES = 4;
 const SCANNER_DUPLICATE_DELAY_MS = 1600;
 const openLibraryMetadataCache = {};
+const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 
 clearLegacyStoredApiKey();
 renderPreviewHeader();
@@ -188,59 +190,11 @@ uploadZone.addEventListener("drop", (event) => {
 });
 
 processButton.addEventListener("click", async () => {
-  const isbnColumn = isbnColumnSelect.value;
-  const shouldUseSelectedColumn = !isbnColumnSelect.disabled;
+  await processAllRows();
+});
 
-  if (shouldUseSelectedColumn && !isbnColumn) {
-    setStatus("Select the ISBN column before fetching data.", "warn");
-    return;
-  }
-
-  processButton.disabled = true;
-  exportButton.disabled = true;
-  state.enrichedRows = [];
-  renderPreview([]);
-
-  const total = state.sourceRows.length;
-  setStatus(`Looking up ${total} row${total === 1 ? "" : "s"} from Google Books...`, "info");
-
-  const enrichedRows = [];
-  let foundCount = 0;
-
-  for (let index = 0; index < total; index += 1) {
-    const row = state.sourceRows[index];
-    const rawIsbn = shouldUseSelectedColumn ? row[isbnColumn] : row["ISBN Number"];
-    const isbn = normalizeIsbn(rawIsbn);
-
-    setStatus(`Processing row ${index + 1} of ${total}...`, "info");
-
-    if (!isbn) {
-      enrichedRows.push(buildEmptyRow(rawIsbn, "Missing or invalid ISBN-13."));
-      continue;
-    }
-
-    const book = await fetchBookByIsbn(isbn);
-    if (book.found) {
-      foundCount += 1;
-    }
-    enrichedRows.push(book.row);
-    renderPreview(filterRows(enrichedRows));
-
-    if (index < total - 1) {
-      await delay(REQUEST_DELAY_MS);
-    }
-  }
-
-  state.enrichedRows = enrichedRows;
-  exportButton.disabled = enrichedRows.length === 0;
-  processButton.disabled = false;
-  renderPreview(getFilteredRows());
-
-  const missingCount = total - foundCount;
-  setStatus(
-    `Finished. Found metadata for ${foundCount} row${foundCount === 1 ? "" : "s"}; ${missingCount} row${missingCount === 1 ? "" : "s"} had partial or no results.`,
-    missingCount > 0 ? "warn" : "info",
-  );
+rerunFailedButton.addEventListener("click", async () => {
+  await rerunFailedRows();
 });
 
 exportButton.addEventListener("click", () => {
@@ -681,6 +635,7 @@ function resetUi() {
   columnField.classList.add("hidden");
   processButton.disabled = true;
   exportButton.disabled = true;
+  rerunFailedButton.disabled = true;
   fileSummary.classList.add("hidden");
   tableSearchInput.value = "";
   columnHint.textContent = "Required only for CSV uploads.";
@@ -690,6 +645,137 @@ function resetUi() {
 function setStatus(message, type) {
   statusBanner.textContent = message;
   statusBanner.className = `status-banner ${type}`;
+}
+
+async function processAllRows() {
+  const isbnColumn = getSelectedIsbnColumn();
+  if (!isbnColumn) {
+    return;
+  }
+
+  state.enrichedRows = [];
+  renderPreview([]);
+  updateActionButtons(true);
+
+  const total = state.sourceRows.length;
+  setStatus(`Looking up ${total} row${total === 1 ? "" : "s"} from Google Books...`, "info");
+
+  const result = await processRows(state.sourceRows, {
+    isbnColumn,
+    existingRows: [],
+    statusTotal: total,
+    statusLabel: "Processing row",
+  });
+
+  state.enrichedRows = result.rows;
+  renderPreview(getFilteredRows());
+  updateActionButtons(false);
+  setCompletionStatus(result.foundCount, result.rows.length);
+}
+
+async function rerunFailedRows() {
+  const isbnColumn = getSelectedIsbnColumn();
+  if (!isbnColumn) {
+    return;
+  }
+
+  const failedIndexes = getFailedRowIndexes();
+  if (!failedIndexes.length) {
+    setStatus("There are no failed rows to rerun.", "info");
+    updateActionButtons(false);
+    return;
+  }
+
+  updateActionButtons(true);
+  setStatus(`Retrying ${failedIndexes.length} failed row${failedIndexes.length === 1 ? "" : "s"}...`, "info");
+
+  const result = await processRows(
+    failedIndexes.map((index) => state.sourceRows[index]),
+    {
+      isbnColumn,
+      existingRows: state.enrichedRows,
+      rowIndexes: failedIndexes,
+      statusTotal: failedIndexes.length,
+      statusLabel: "Retrying failed row",
+    },
+  );
+
+  state.enrichedRows = result.rows;
+  renderPreview(getFilteredRows());
+  updateActionButtons(false);
+  setCompletionStatus(countSuccessfulRows(state.enrichedRows), state.enrichedRows.length);
+}
+
+function getSelectedIsbnColumn() {
+  const isbnColumn = isbnColumnSelect.value;
+  const shouldUseSelectedColumn = !isbnColumnSelect.disabled;
+
+  if (shouldUseSelectedColumn && !isbnColumn) {
+    setStatus("Select the ISBN column before fetching data.", "warn");
+    return "";
+  }
+
+  return shouldUseSelectedColumn ? isbnColumn : "ISBN Number";
+}
+
+async function processRows(rowsToProcess, options) {
+  const {
+    isbnColumn,
+    existingRows = [],
+    rowIndexes = null,
+    statusTotal = rowsToProcess.length,
+    statusLabel = "Processing row",
+  } = options;
+  const updatedRows = existingRows.slice();
+  let foundCount = 0;
+
+  for (let index = 0; index < rowsToProcess.length; index += 1) {
+    const row = rowsToProcess[index];
+    const rawIsbn = row[isbnColumn];
+    const isbn = normalizeIsbn(rawIsbn);
+
+    setStatus(`${statusLabel} ${index + 1} of ${statusTotal}...`, "info");
+
+    let nextRow;
+    if (!isbn) {
+      nextRow = buildEmptyRow(rawIsbn, "Missing or invalid ISBN-13.");
+    } else {
+      const book = await fetchBookByIsbn(isbn);
+      if (book.found) {
+        foundCount += 1;
+      }
+      nextRow = book.row;
+    }
+
+    if (Array.isArray(rowIndexes)) {
+      updatedRows[rowIndexes[index]] = nextRow;
+    } else {
+      updatedRows.push(nextRow);
+    }
+
+    state.enrichedRows = updatedRows.slice();
+    renderPreview(getFilteredRows());
+
+    if (index < rowsToProcess.length - 1) {
+      await delay(REQUEST_DELAY_MS);
+    }
+  }
+
+  return { rows: updatedRows, foundCount };
+}
+
+function updateActionButtons(isProcessing) {
+  processButton.disabled = isProcessing || state.sourceRows.length === 0;
+  exportButton.disabled = isProcessing || state.enrichedRows.length === 0;
+  rerunFailedButton.disabled = isProcessing || getFailedRowIndexes().length === 0;
+}
+
+function setCompletionStatus(foundCount, totalCount) {
+  const missingCount = totalCount - foundCount;
+  setStatus(
+    `Finished. Found metadata for ${foundCount} row${foundCount === 1 ? "" : "s"}; ${missingCount} row${missingCount === 1 ? "" : "s"} had partial or no results.`,
+    missingCount > 0 ? "warn" : "info",
+  );
 }
 
 function renderPreview(rows) {
@@ -856,7 +942,7 @@ async function fetchBookByIsbn(isbn) {
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
     try {
       const response = await fetch(buildGoogleBooksUrl(isbn), buildRequestOptions());
-      if (response.status === 429) {
+      if (RETRYABLE_STATUS_CODES.has(response.status)) {
         if (attempt < MAX_RETRIES) {
           await delay(getRetryDelayMs(attempt, response.headers.get("Retry-After")));
           continue;
@@ -864,7 +950,7 @@ async function fetchBookByIsbn(isbn) {
 
         return {
           found: false,
-          row: buildEmptyRow(isbn, "Google Books rate limit reached (429). Add an API key or try again later."),
+          row: buildEmptyRow(isbn, buildRetryExhaustedMessage(response.status)),
         };
       }
 
@@ -1184,10 +1270,40 @@ function getRetryDelayMs(attempt, retryAfterHeader) {
   return Math.min(2000 * Math.pow(2, attempt), 12000);
 }
 
+function buildRetryExhaustedMessage(status) {
+  if (status === 429) {
+    return "Google Books rate limit reached (429). Add an API key or try again later.";
+  }
+
+  return `Google Books was temporarily unavailable (${status}) after multiple retries. Try rerunning failed rows.`;
+}
+
 function delay(ms) {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms);
   });
+}
+
+function isFailedRow(row) {
+  if (!row) {
+    return false;
+  }
+
+  const description = String(getValue(row["Body (HTML)"], ""));
+  return /Missing or invalid ISBN-13\.|Request failed \(\d+\)\.|No Google Books result\.|Network error while contacting Google Books\.|Unknown lookup error\.|temporarily unavailable \(\d+\) after multiple retries\.|rate limit reached \(429\)\./.test(description);
+}
+
+function getFailedRowIndexes() {
+  return state.enrichedRows.reduce((indexes, row, index) => {
+    if (isFailedRow(row)) {
+      indexes.push(index);
+    }
+    return indexes;
+  }, []);
+}
+
+function countSuccessfulRows(rows) {
+  return rows.reduce((count, row) => count + (isFailedRow(row) ? 0 : 1), 0);
 }
 
 function buildDescriptionPreview(description) {
