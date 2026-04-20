@@ -47,6 +47,7 @@ const useScannedButton = document.getElementById("useScannedButton");
 const clearScannedButton = document.getElementById("clearScannedButton");
 
 const AUTHOR_METAFIELD = "Author (product.metafields.custom.author)";
+const ISBN_METAFIELD = "ISBN (product.metafields.custom.isbn)";
 const PUBLICATION_DATE_METAFIELD = "Publication Date (product.metafields.custom.publication_date)";
 const PUBLISHER_METAFIELD = "Publisher (product.metafields.custom.publisher)";
 const PAGE_COUNT_METAFIELD = "Page Count (product.metafields.custom.page_count)";
@@ -57,6 +58,8 @@ const FORMAT_METAFIELD = "Format (product.metafields.custom.format)";
 const OUTPUT_COLUMNS = [
   "Title",
   "Body (HTML)",
+  AUTHOR_METAFIELD,
+  ISBN_METAFIELD,
   "Image Src",
   PUBLISHER_METAFIELD,
   "Type",
@@ -65,9 +68,9 @@ const OUTPUT_COLUMNS = [
   DIMENSIONS_METAFIELD,
   TRANSLATOR_METAFIELD,
   FORMAT_METAFIELD,
-  AUTHOR_METAFIELD,
   "Option1 Name",
   "Option1 Value",
+  "Variant Barcode",
   "Handle",
   "Vendor",
 ];
@@ -79,6 +82,7 @@ const PREVIEW_COLUMN_LABELS = {
   "Option1 Name": "Option Name",
   "Option1 Value": "Option Value",
   [AUTHOR_METAFIELD]: "Author",
+  [ISBN_METAFIELD]: "ISBN",
   [PUBLICATION_DATE_METAFIELD]: "Publication Date",
   [PUBLISHER_METAFIELD]: "Publisher",
   [PAGE_COUNT_METAFIELD]: "Page Count",
@@ -945,10 +949,12 @@ async function buildBookResult(isbn, item) {
       "Type": "Book",
       "Option1 Name": "Title",
       "Option1 Value": "Default Title",
+      "Variant Barcode": outputIsbn,
       "Image Src": coverImageUrls.primary,
       "Cover Fallback URL": coverImageUrls.fallback,
       __coverCandidates: coverImageUrls.candidates,
       [AUTHOR_METAFIELD]: author,
+      [ISBN_METAFIELD]: outputIsbn,
       [PUBLICATION_DATE_METAFIELD]: publicationDate,
       [PUBLISHER_METAFIELD]: publisher,
       [PAGE_COUNT_METAFIELD]: volumeInfo.pageCount ? String(volumeInfo.pageCount) : "",
@@ -970,9 +976,11 @@ function buildEmptyRow(isbn, descriptionFallback) {
     "Type": "Book",
     "Option1 Name": "Title",
     "Option1 Value": "Default Title",
+    "Variant Barcode": normalizedIsbn || "",
     "Image Src": "",
     "Cover Fallback URL": "",
     [AUTHOR_METAFIELD]: "",
+    [ISBN_METAFIELD]: normalizedIsbn || "",
     [PUBLICATION_DATE_METAFIELD]: "",
     [PUBLISHER_METAFIELD]: "",
     [PAGE_COUNT_METAFIELD]: "",
